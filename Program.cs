@@ -1,9 +1,12 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows;
 using Newtonsoft.Json.Linq;
 using WebSocket4Net;
 using WindowsInput;
+using WindowsInput.Native;
 
 namespace RemoteCloudPC
 {
@@ -12,6 +15,22 @@ namespace RemoteCloudPC
         static readonly int ScreenWidth = (int)SystemParameters.PrimaryScreenWidth;
         static readonly int ScreenHeight = (int)SystemParameters.PrimaryScreenHeight;
         static readonly InputSimulator inputSimulator = new InputSimulator();
+
+        static readonly IReadOnlyDictionary<string, VirtualKeyCode> keyCodeTable =
+            Enum.GetValues(typeof(VirtualKeyCode))
+                .Cast<VirtualKeyCode>()
+                .Distinct()
+                .ToDictionary(value => Enum.GetName(typeof(VirtualKeyCode), value));
+
+        static readonly IReadOnlyDictionary<string, string> keyTranslationTable = new Dictionary<string, string> {
+            { "BACKSPACE", "BACK" },
+            { "ENTER", "RETURN" },
+            { "ALT", "MENU" },
+            { "ARROWLEFT", "LEFT" },
+            { "ARROWRIGHT", "RIGHT" },
+            { "ARROWUP", "UP" },
+            { "ARROWDOWN", "DOWN" },
+        };
 
         static string serverAddress;
         static string hostId;
@@ -90,8 +109,41 @@ namespace RemoteCloudPC
                 }
 
                 case "key-down":
+                    OnKeyDown(message);
                     break;
             }
+        }
+
+        static void OnKeyDown(JObject message)
+        {
+            var key = message["key"].ToString();
+            var shift = message["shift"].Value<bool>();
+            var ctrl = message["ctrl"].Value<bool>();
+            var alt = message["alt"].Value<bool>();
+
+            if (key.Length == 1 && !ctrl && !alt) {
+                inputSimulator.Keyboard.TextEntry(key);
+                return;
+            }
+
+            key = key.ToUpper();
+            if (key.Length == 1 && char.IsLetterOrDigit(key[0]))
+                key = "VK_" + key;
+
+            string translatedKey;
+            var exists = keyTranslationTable.TryGetValue(key, out translatedKey);
+            if (!exists)
+                translatedKey = key;
+
+            var modifiers = new List<VirtualKeyCode>(3);
+            if (shift)
+                modifiers.Add(VirtualKeyCode.SHIFT);
+            if (ctrl)
+                modifiers.Add(VirtualKeyCode.CONTROL);
+            if (alt)
+                modifiers.Add(VirtualKeyCode.MENU);
+
+            inputSimulator.Keyboard.ModifiedKeyStroke(modifiers, keyCodeTable[translatedKey]);
         }
     }
 }
